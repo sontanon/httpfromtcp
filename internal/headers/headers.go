@@ -9,6 +9,7 @@ import (
 type Headers map[string]string
 
 const CRLF = "\r\n"
+const CRLF_LENGTH = 2
 const COLON = ":"
 
 const STANDARD_RUNES = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~"
@@ -28,7 +29,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	}
 
 	if index == 0 {
-		return 0, true, nil
+		return CRLF_LENGTH, true, nil
 	}
 
 	key, value, found := strings.Cut(string(data[:index]), COLON)
@@ -54,5 +55,10 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		h[key] = fmt.Sprintf("%s, %s", h[key], strings.TrimSpace(value))
 	}
 
-	return index + len([]byte(CRLF)), false, nil
+	return index + CRLF_LENGTH, false, nil
+}
+
+func (h Headers) Get(key string) (string, bool) {
+	value, ok := h[strings.ToLower(key)]
+	return value, ok
 }

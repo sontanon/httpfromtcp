@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"httpfromtcp/internal/headers"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -19,13 +20,16 @@ const (
 	parserStateInvalid parserState = iota
 	parserStateInitialized
 	parserStateParsingHeaders
+	parserStateParsingBody
 	parserStateDone
 )
 
 type Request struct {
-	RequestLine RequestLine
-	Headers     headers.Headers
-	state       parserState
+	RequestLine   RequestLine
+	Headers       headers.Headers
+	state         parserState
+	Body          []byte
+	bodyBytesRead int
 }
 
 type RequestLine struct {
@@ -39,12 +43,16 @@ func (r Request) PrettyPrint() string {
 	for key, value := range r.Headers {
 		headersString += fmt.Sprintf("- %s: %s\n", key, value)
 	}
+	bodyString := ""
+	if r.Body != nil {
+		bodyString = fmt.Sprintf("\nBody:\n%s\n", string(r.Body))
+	}
 	return fmt.Sprintf(`Request line:
 - Method: %s
 - Target: %s
 - Version: 1.1
 Headers:
-%s`, r.RequestLine.Method, r.RequestLine.RequestTarget, headersString)
+%s%s`, r.RequestLine.Method, r.RequestLine.RequestTarget, headersString, bodyString)
 }
 
 func (r *Request) parse(data []byte) (int, error) {
@@ -66,9 +74,41 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.state = parserStateDone
+			r.state = parserStateParsingBody
 		}
 		return n, nil
+	case parserStateParsingBody:
+		if r.Body == nil {
+			contentLengthString, exists := r.Headers.Get("Content-Length")
+			if !exists {
+				r.state = parserStateDone
+				return 0, nil
+			}
+
+			contentLength, err := strconv.Atoi(contentLengthString)
+			if err != nil {
+				return 0, fmt.Errorf("invalid Content-Length header value %q: %w", contentLengthString, err)
+			}
+
+			if contentLength < 0 {
+				return 0, fmt.Errorf("invalid negative Content-Length: %d", contentLength)
+			}
+			r.Body = make([]byte, contentLength)
+			r.bodyBytesRead = 0
+		}
+
+		if r.bodyBytesRead+len(data) > len(r.Body) {
+			return 0, fmt.Errorf("request body too large: %d bytes read, %d bytes remaining", r.bodyBytesRead, len(r.Body)-r.bodyBytesRead)
+		}
+
+		n := copy(r.Body[r.bodyBytesRead:], data)
+		r.bodyBytesRead += n
+		if r.bodyBytesRead == len(r.Body) {
+			r.state = parserStateDone
+		}
+
+		return n, nil
+
 	case parserStateDone:
 		return 0, fmt.Errorf("attempting to read from a done state")
 	default:
@@ -126,26 +166,28 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		n, err := reader.Read(buffer[readToIndex:])
 		if err != nil {
-			// if errors.Is(err, io.EOF) {
-			// 	if r.state == parserStateDone {
-			// 		break
-			// 	}
-
-			// 	// Final parse attempt.
-			// 	readToIndex += n
-			// 	_, parseErr := r.parse(buffer[:readToIndex])
-			// 	if parseErr != nil {
-			// 		return nil, parseErr
-			// 	}
-			// 	if r.state != parserStateDone {
-			// 		return nil, fmt.Errorf(("incomplete HTTP request: unexpected EOF"))
-			// 	}
-			// }
 			if errors.Is(err, io.EOF) {
-				r.state = parserStateDone
-				break
+				if r.state == parserStateDone {
+					break
+				}
+
+				// Final parse attempt.
+				readToIndex += n
+				_, parseErr := r.parse(buffer[:readToIndex])
+				if parseErr != nil {
+					return nil, parseErr
+				}
+				if r.state != parserStateDone {
+					return nil, fmt.Errorf(("incomplete HTTP request: unexpected EOF"))
+				} else {
+					break
+				}
 			}
-			return nil, err
+			// if errors.Is(err, io.EOF) {
+			// 	r.state = parserStateDone
+			// 	break
+			// }
+			// return nil, err
 		}
 
 		readToIndex += n
