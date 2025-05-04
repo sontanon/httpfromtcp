@@ -11,8 +11,14 @@ type Headers map[string]string
 const CRLF = "\r\n"
 const COLON = ":"
 
+const STANDARD_RUNES = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~"
+
 func NewHeaders() Headers {
 	return make(Headers)
+}
+
+func InvalidRune(r rune) bool {
+	return !strings.ContainsRune(STANDARD_RUNES, r)
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
@@ -34,7 +40,19 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("invalid header key contains trailing whitespace")
 	}
 
-	h[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	key = strings.TrimSpace(key)
+	if strings.ContainsFunc(key, InvalidRune) {
+		return 0, false, fmt.Errorf("invalid header key contains invalid characters")
+	}
+
+	key = strings.ToLower(key)
+
+	_, exists := h[key]
+	if !exists {
+		h[key] = strings.TrimSpace(value)
+	} else {
+		h[key] = fmt.Sprintf("%s, %s", h[key], strings.TrimSpace(value))
+	}
 
 	return index + len([]byte(CRLF)), false, nil
 }
