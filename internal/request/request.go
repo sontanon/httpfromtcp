@@ -30,6 +30,13 @@ type RequestLine struct {
 	Method        string
 }
 
+func (r Request) PrettyPrint() string {
+	return fmt.Sprintf(`Request line:
+- Method: %s
+- Target: %s
+- Version: 1.1`, r.RequestLine.Method, r.RequestLine.RequestTarget)
+}
+
 func (r *Request) parse(data []byte) (int, error) {
 	switch r.State {
 	case ParserStateInitialized:
