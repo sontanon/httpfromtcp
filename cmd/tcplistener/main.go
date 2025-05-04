@@ -21,10 +21,18 @@ func main() {
 		}
 		log.Println("connection accepted")
 
-		r, err := request.RequestFromReader(conn)
-		if err != nil {
-			log.Fatal("failed to create request from connection")
-		}
-		fmt.Println(r.PrettyPrint())
+		go handleConnection(conn)
 	}
+}
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	r, err := request.RequestFromReader(conn)
+	if err != nil {
+		log.Printf("Error processing request: %v", err)
+		return
+	}
+
+	fmt.Println(r.PrettyPrint())
 }

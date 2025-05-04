@@ -35,10 +35,16 @@ type RequestLine struct {
 }
 
 func (r Request) PrettyPrint() string {
+	headersString := ""
+	for key, value := range r.Headers {
+		headersString += fmt.Sprintf("- %s: %s\n", key, value)
+	}
 	return fmt.Sprintf(`Request line:
 - Method: %s
 - Target: %s
-- Version: 1.1`, r.RequestLine.Method, r.RequestLine.RequestTarget)
+- Version: 1.1
+Headers:
+%s`, r.RequestLine.Method, r.RequestLine.RequestTarget, headersString)
 }
 
 func (r *Request) parse(data []byte) (int, error) {
@@ -120,8 +126,24 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		n, err := reader.Read(buffer[readToIndex:])
 		if err != nil {
-			if errors.Is(err, io.EOF) && r.state != parserStateDone {
-				return nil, fmt.Errorf("unexpected EOF while reading request")
+			// if errors.Is(err, io.EOF) {
+			// 	if r.state == parserStateDone {
+			// 		break
+			// 	}
+
+			// 	// Final parse attempt.
+			// 	readToIndex += n
+			// 	_, parseErr := r.parse(buffer[:readToIndex])
+			// 	if parseErr != nil {
+			// 		return nil, parseErr
+			// 	}
+			// 	if r.state != parserStateDone {
+			// 		return nil, fmt.Errorf(("incomplete HTTP request: unexpected EOF"))
+			// 	}
+			// }
+			if errors.Is(err, io.EOF) {
+				r.state = parserStateDone
+				break
 			}
 			return nil, err
 		}
