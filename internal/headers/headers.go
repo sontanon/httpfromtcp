@@ -17,7 +17,7 @@ func NewHeaders() Headers {
 	return make(Headers)
 }
 
-func InvalidRune(r rune) bool {
+func invalidRune(r rune) bool {
 	return !strings.ContainsRune(STANDARD_RUNES, r)
 }
 
@@ -41,7 +41,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	}
 
 	key = strings.TrimSpace(key)
-	if strings.ContainsFunc(key, InvalidRune) {
+	if strings.ContainsFunc(key, invalidRune) {
 		return 0, false, fmt.Errorf("invalid header key contains invalid characters")
 	}
 

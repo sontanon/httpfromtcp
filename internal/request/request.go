@@ -4,24 +4,28 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"httpfromtcp/internal/headers"
 	"io"
 	"strings"
 	"unicode"
 )
 
-type ParserState int
+const BUFFER_SIZE int = 8
+const CRLF = "\r\n"
+
+type parserState int
 
 const (
-	ParserStateInvalid ParserState = iota
-	ParserStateInitialized
-	ParserStateDone
+	parserStateInvalid parserState = iota
+	parserStateInitialized
+	parserStateParsingHeaders
+	parserStateDone
 )
-
-const BUFFER_SIZE int = 8
 
 type Request struct {
 	RequestLine RequestLine
-	State       ParserState
+	Headers     headers.Headers
+	state       parserState
 }
 
 type RequestLine struct {
@@ -38,8 +42,8 @@ func (r Request) PrettyPrint() string {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	switch r.State {
-	case ParserStateInitialized:
+	switch r.state {
+	case parserStateInitialized:
 		requestLine, n, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
@@ -48,16 +52,23 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = *requestLine
-		r.State = ParserStateDone
+		r.state = parserStateParsingHeaders
 		return n, nil
-	case ParserStateDone:
+	case parserStateParsingHeaders:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.state = parserStateDone
+		}
+		return n, nil
+	case parserStateDone:
 		return 0, fmt.Errorf("attempting to read from a done state")
 	default:
 		return 0, fmt.Errorf("unknown parser state")
 	}
 }
-
-const CRLF = "\r\n"
 
 func parseRequestLine(data []byte) (*RequestLine, int, error) {
 	index := bytes.Index(data, []byte(CRLF))
@@ -98,9 +109,9 @@ func buildRequestLine(header string) (*RequestLine, error) {
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	buffer := make([]byte, BUFFER_SIZE)
 	readToIndex := 0
-	r := &Request{State: ParserStateInitialized}
+	r := &Request{state: parserStateInitialized, Headers: headers.NewHeaders()}
 
-	for r.State != ParserStateDone {
+	for r.state != parserStateDone {
 		if readToIndex >= len(buffer) {
 			newBuffer := make([]byte, 2*readToIndex)
 			copy(newBuffer, buffer)
@@ -109,9 +120,8 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		n, err := reader.Read(buffer[readToIndex:])
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				r.State = ParserStateDone
-				break
+			if errors.Is(err, io.EOF) && r.state != parserStateDone {
+				return nil, fmt.Errorf("unexpected EOF while reading request")
 			}
 			return nil, err
 		}
@@ -122,7 +132,8 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			return nil, err
 		}
 		if m != 0 {
-			newBuffer := make([]byte, len(buffer)-m)
+			newBufferSize := max(BUFFER_SIZE, len(buffer)-m)
+			newBuffer := make([]byte, newBufferSize)
 			copy(newBuffer, buffer[m:])
 			buffer = newBuffer
 			readToIndex -= m
