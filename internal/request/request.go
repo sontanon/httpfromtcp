@@ -165,43 +165,34 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 
 		n, err := reader.Read(buffer[readToIndex:])
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if r.state == parserStateDone {
-					break
-				}
-
-				// Final parse attempt.
-				readToIndex += n
-				_, parseErr := r.parse(buffer[:readToIndex])
+		if n > 0 {
+			readToIndex += n
+			for {
+				consumed, parseErr := r.parse(buffer[:readToIndex])
 				if parseErr != nil {
 					return nil, parseErr
 				}
-				if r.state != parserStateDone {
-					return nil, fmt.Errorf(("incomplete HTTP request: unexpected EOF"))
-				} else {
+				if consumed == 0 || r.state == parserStateDone {
 					break
 				}
-			}
-			// if errors.Is(err, io.EOF) {
-			// 	r.state = parserStateDone
-			// 	break
-			// }
-			// return nil, err
-		}
 
-		readToIndex += n
-		m, err := r.parse(buffer[:readToIndex])
+				remaining := readToIndex - consumed
+				if remaining > 0 {
+					copy(buffer, buffer[consumed:readToIndex])
+				}
+				readToIndex = remaining
+			}
+		}
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if r.state != parserStateDone {
+					return nil, fmt.Errorf("incomplete HTTP request: connection closed unexpectedly (EOF) in state %v with %d bytes remaining in buffer: [%v]", r.state, readToIndex, buffer[:readToIndex])
+				}
+				break
+			}
 			return nil, err
 		}
-		if m != 0 {
-			newBufferSize := max(BUFFER_SIZE, len(buffer)-m)
-			newBuffer := make([]byte, newBufferSize)
-			copy(newBuffer, buffer[m:])
-			buffer = newBuffer
-			readToIndex -= m
-		}
+
 	}
 
 	return r, nil
