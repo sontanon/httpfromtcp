@@ -3,15 +3,11 @@ package server
 import (
 	"fmt"
 	"httpfromtcp/internal/request"
+	"httpfromtcp/internal/response"
 	"log"
 	"net"
 	"sync/atomic"
 )
-
-const STATIC_RESPONSE string = `HTTP/1.1 200 OK
-Content-Type: text/plain
-
-Hello World!`
 
 type Server struct {
 	listener net.Listener
@@ -62,5 +58,13 @@ func (s *Server) handle(conn net.Conn) {
 	}
 	log.Println(r.PrettyPrint())
 
-	_, _ = conn.Write([]byte(STATIC_RESPONSE))
+	if err := response.WriteStatusLine(conn, response.StatusCodeOK); err != nil {
+		log.Printf("failed writing status line: %v", err)
+		return
+	}
+	h := response.GetDefaultHeaders(0)
+	if err := response.WriteHeaders(conn, h); err != nil {
+		log.Printf("failed writing headers: %v", err)
+		return
+	}
 }
