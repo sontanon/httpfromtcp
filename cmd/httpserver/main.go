@@ -58,6 +58,7 @@ var proxyHandler server.Handler = func(w *response.Writer, req *request.Request)
 		_ = w.WriteStatusLine(statusCode)
 		_ = w.WriteHeaders(response.GetDefaultHeaders(0))
 		return
+
 	}
 	defer resp.Body.Close()
 	buffer := make([]byte, BUFFER_SIZE)
@@ -126,6 +127,38 @@ var proxyHandler server.Handler = func(w *response.Writer, req *request.Request)
 
 }
 
+var videoHandler server.Handler = func(w *response.Writer, req *request.Request) {
+
+	body, err := os.ReadFile("assets/vim.mp4")
+	if err != nil {
+		log.Printf("error reading video file: %v", err)
+		return
+	}
+
+	if err := w.WriteStatusLine(response.StatusCodeOK); err != nil {
+		log.Printf("error writing status line: %v", err)
+		return
+	}
+
+	contentLength := len(body)
+	h := response.GetDefaultHeaders(contentLength)
+	h.Set("Content-Type", "video/mp4")
+	if err := w.WriteHeaders(h); err != nil {
+		log.Printf("error writing headers: %v", err)
+		return
+	}
+
+	n, err := w.WriteBody(body)
+	if err != nil {
+		log.Printf("error writing body: %v", err)
+		return
+	}
+	if n != contentLength {
+		log.Printf("wrote %d bytes instead of %d bytes as expected by content-length", n, contentLength)
+		return
+	}
+}
+
 var mainHandler server.Handler = func(w *response.Writer, req *request.Request) {
 	var statusCode response.StatusCode
 	var body []byte
@@ -136,6 +169,9 @@ var mainHandler server.Handler = func(w *response.Writer, req *request.Request) 
 	// httpbin case handled separately
 	case strings.HasPrefix(requestTarget, "/httpbin"):
 		proxyHandler(w, req)
+		return
+	case requestTarget == "/video" && req.RequestLine.Method == "GET":
+		videoHandler(w, req)
 		return
 
 	case requestTarget == "/yourproblem":
