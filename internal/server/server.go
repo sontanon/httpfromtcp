@@ -9,12 +9,32 @@ import (
 	"sync/atomic"
 )
 
+const BUFFER_SIZE = 1_024
+
 type Server struct {
 	listener net.Listener
+	handler  Handler
 	open     *atomic.Bool
 }
 
-func Serve(port int) (*Server, error) {
+type HandlerError struct {
+	Status  response.StatusCode
+	Message string
+}
+
+type Handler func(w *response.Writer, req *request.Request)
+
+func (he HandlerError) WriteError(w *response.Writer) {
+	body := []byte(he.Message)
+	contentLength := len(body)
+	headers := response.GetDefaultHeaders(contentLength)
+
+	_ = w.WriteStatusLine(he.Status)
+	_ = w.WriteHeaders(headers)
+	_, _ = w.WriteBody(body)
+}
+
+func Serve(port int, handler Handler) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, err
@@ -22,7 +42,11 @@ func Serve(port int) (*Server, error) {
 	open := atomic.Bool{}
 	open.Store(true)
 
-	server := Server{listener: listener, open: &open}
+	server := Server{
+		listener: listener,
+		handler:  handler,
+		open:     &open,
+	}
 
 	go server.listen()
 
@@ -51,20 +75,16 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	r, err := request.RequestFromReader(conn)
-	if err != nil {
-		log.Printf("error processing request: %v", err)
-		return
-	}
-	log.Println(r.PrettyPrint())
+	writer := response.NewWriter(conn)
 
-	if err := response.WriteStatusLine(conn, response.StatusCodeOK); err != nil {
-		log.Printf("failed writing status line: %v", err)
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		HandlerError{
+			Status:  response.StatusCodeBadRequest,
+			Message: err.Error(),
+		}.WriteError(&writer)
 		return
 	}
-	h := response.GetDefaultHeaders(0)
-	if err := response.WriteHeaders(conn, h); err != nil {
-		log.Printf("failed writing headers: %v", err)
-		return
-	}
+
+	s.handler(&writer, req)
 }
